@@ -1,0 +1,8 @@
+{
+  "owner": "EsunLee",
+  "source": "seeds_100.json",
+  "assignment_rule": "seeds_100.json 按数值升序；索引 [0:3] 归 EsunLee，[3:6] 归同事（待同事确认）",
+  "seeds": [5922, 13764, 14933],
+  "count": 3,
+  "generated_at": "2026-08-14"
+}
