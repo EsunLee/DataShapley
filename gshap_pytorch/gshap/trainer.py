@@ -202,7 +202,7 @@ class GShapTrainer:
             # and the sequential model emits 1-D logits, so the per-element math is identical
             logits = (torch.bmm(hidden, w2) + b2).squeeze(2)
             loss_per_stream = F.binary_cross_entropy_with_logits(
-                logits, targets, reduction="none").mean(dim=(1, 2))
+                logits, targets, reduction="none").mean(dim=1)
             if (start // batch_size) % 100 == 0 and not torch.isfinite(loss_per_stream).all():
                 raise FloatingPointError(f"Non-finite loss for seeds {seeds}, batch {start}")
             loss_per_stream.sum().backward()
