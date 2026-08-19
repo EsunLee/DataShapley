@@ -43,6 +43,7 @@ class RuntimeConfig:
     keep_marginals: bool = False
     deterministic: bool = True
     checkpoint_every: int = 5
+    parallel_perms: bool = False
 
 
 @dataclass(frozen=True)

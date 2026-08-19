@@ -29,6 +29,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--feature-file", default="ucf_train_feat_704459x512.npy")
     result.add_argument("--label-file", default="ucf_train_label_704459x1.npy")
     result.add_argument("--keep-marginals", action="store_true")
+    result.add_argument("--parallel-perms", action="store_true",
+                        help="Run the group's permutations simultaneously (stacked bmm); "
+                             "per-iteration wall times are amortized over the streams")
     return result
 
 
@@ -38,7 +41,8 @@ def main() -> None:
                       test_size=args.test_size, lr_val_size=args.lr_val_size)
     train = TrainConfig(batch_size=args.batch_size, iterations=args.iterations,
                         learning_rate=args.learning_rate)
-    runtime = RuntimeConfig(device=args.device, keep_marginals=args.keep_marginals)
+    runtime = RuntimeConfig(device=args.device, keep_marginals=args.keep_marginals,
+                            parallel_perms=args.parallel_perms)
     config = ExperimentConfig(args.data_dir, args.results_dir, data=data, train=train, runtime=runtime)
     bundle = load_or_create_bundle(args.data_dir, args.results_dir / "split", data)
     learning_rate = args.learning_rate
