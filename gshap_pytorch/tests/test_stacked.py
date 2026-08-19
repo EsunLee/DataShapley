@@ -11,7 +11,8 @@ def _make_bundle() -> DatasetBundle:
     rng = np.random.default_rng(11)
     n = 2_048
     features = rng.normal(size=(n, 512)).astype(np.float32)
-    labels = (rng.random(n) < 0.5).astype(np.float32).reshape(-1, 1)
+    # 1-D labels: the trainer contract (load_or_create_bundle reshapes to (-1))
+    labels = (rng.random(n) < 0.5).astype(np.float32)
     train, test, lr_val = create_split(labels, test_size=48, lr_val_size=16, seed=0)
     return DatasetBundle(features, labels, train, test, lr_val)
 

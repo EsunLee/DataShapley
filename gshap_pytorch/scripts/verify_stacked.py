@@ -29,7 +29,7 @@ def main() -> None:
     rng = np.random.default_rng(11)
     n = 4_096
     features = rng.normal(size=(n, 512)).astype(np.float32)
-    labels = (rng.random(n) < 0.5).astype(np.float32).reshape(-1, 1)
+    labels = (rng.random(n) < 0.5).astype(np.float32)  # 1-D: trainer contract, cf. load_or_create_bundle
     train, test, lr_val = create_split(labels, test_size=96, lr_val_size=32, seed=0)
     bundle = DatasetBundle(features, labels, train, test, lr_val)
     config = ExperimentConfig(
