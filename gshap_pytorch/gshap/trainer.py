@@ -347,7 +347,7 @@ class GShapTrainer:
                 }
                 if parallel:
                     meta["parallel_perms"] = True
-                    meta["wall_group_seconds"] = round(wall_group, 6)
+                    meta["wall_group_seconds"] = round(wall_group, 2)
                     meta["time_semantics"] = (
                         "per-iteration wall/gpu times are the group wall time amortized "
                         "over the parallel permutation streams")

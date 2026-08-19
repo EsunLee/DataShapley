@@ -20,6 +20,26 @@ def read_costs(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+TIME_COLUMNS = {
+    "wall_train_time", "wall_eval_time", "wall_total_time",
+    "gpu_train_time", "gpu_eval_time",
+    "wall_train_time_cumulative", "wall_eval_time_cumulative",
+    "wall_total_time_cumulative",
+}
+
+
+def round_time_values(costs: list[list[dict[str, str]]]) -> list[list[dict[str, str]]]:
+    """Report time columns to two decimal places (deliverable precision).
+
+    FLOPs stay integer-valued and AUC / efficiency_error keep full precision
+    (rounding final_auc to 2 dp would break the reported efficiency identity).
+    """
+    def round_row(row: dict[str, str]) -> dict[str, str]:
+        return {key: (f"{float(value):.2f}" if key in TIME_COLUMNS else value)
+                for key, value in row.items()}
+    return [[round_row(item) for item in group] for group in costs]
+
+
 def matrix_csv(path: Path, seeds: list[int], costs: list[list[dict[str, str]]], column: str) -> None:
     count = len(costs[0])
     fieldnames = ["seed"] + [f"permutation_{index}" for index in range(1, count + 1)]
@@ -50,6 +70,7 @@ def main() -> None:
         costs.append(read_costs(group / "costs_iteration.csv"))
     if len({len(item) for item in costs}) != 1:
         raise RuntimeError("Groups contain different iteration counts")
+    costs = round_time_values(costs)
     values = np.stack(arrays)
     mean = values.mean(axis=0)
     std = values.std(axis=0, ddof=1)
