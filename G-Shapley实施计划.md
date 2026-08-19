@@ -319,7 +319,7 @@ initial_auc, final_auc
 
 - 机制：50 份 decoder 参数堆叠成 `(50, …)` 张量（`w1 (50,512,128)`、`b1 (50,1,128)`、`w2 (50,128,1)`、`b2 (50,1,1)`），每 batch 步把 50 个排列各自的 128 点收集成 `(50,128,512)`，前向/反向全用 `bmm`；SGD 更新逐流 `add_(grad, alpha=-lr)`（与 `torch.optim.SGD` 同一运算）；评估把 5,000 点测试集广播成 `(50,5000,512)` 一次出 50 组 logits，AUC 用 `binary_auc_batch` 批量计算。
 - 语义不变：每流 batch=128、每 batch 后评估、`ΔAUC/len(B)` 逐点分摊、效率恒等式逐流校验；种子与排列生成与串行完全一致。
-- 一致性：`binary_auc_batch` 与逐流 `binary_auc` 逐位一致（同一套 float64 整数精确秩运算）；前向/反向统一走 `_decoder_logits` 的 bmm 算术——顺序路径（`_run_permutation`）也是 stacked 核心的 S=1 特例，两者共用同一内核族，位级一致由构造保证；唯一残余风险是 cuBLAS batch=1 与 batch=50 的 kernel 选择，由 `tests/test_stacked.py`（atol=1e-12）与 `scripts/verify_stacked.py`（打印 bit-identical 判定）在 GPU 上实证。
+- 一致性（顺序路径保持 Conv1d 原实现不变）：`binary_auc_batch` 与逐流 `binary_auc` 逐位一致（同一套 float64 整数精确秩运算）；stacked 前向/反向用 bmm（cuBLAS），顺序路径用 Conv1d（cuDNN）——GPU 上不同内核族，marginals 有 ~1e-5 级 ulp 差异（远小于 50 排列蒙特卡洛噪声），CPU 上同一 GEMM 内核族可到 1e-12。正式实验只跑 stacked 路径，其位级可复现性由 `CUBLAS_WORKSPACE_CONFIG=:4096:8` + `use_deterministic_algorithms` 保证——`scripts/verify_stacked.py` 的三条通过标准：① 效率恒等式逐流 <1e-9；② stacked 两次运行逐位一致（确定性）；③ max |stacked−sequential| <1e-4（内核噪声界）。
 - 时间语义：`costs_iteration.csv` 每行的 wall/gpu 时间是**组墙钟按排列数均摊**（累计列 = 组墙钟）；`meta.json` 记录 `parallel_perms: true`、`wall_group_seconds`、`time_semantics`。
 - 效果：一组 ≈ 15-30s（实测为准，评估 FLOPs 是训练的 13 倍、主导耗时）；3 组绑 GPU 0/1/3 并行总墙钟 ≈ 1 分钟以内。
 - 使用：`run_group.py --parallel-perms`；断点续跑时剩余排列继续堆叠执行，`group_sum` 累加顺序不变。
