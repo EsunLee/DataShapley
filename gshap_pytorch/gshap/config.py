@@ -42,6 +42,7 @@ class RuntimeConfig:
     keep_permutations: bool = False
     keep_marginals: bool = False
     deterministic: bool = True
+    checkpoint_every: int = 5
 
 
 @dataclass(frozen=True)

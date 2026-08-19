@@ -79,7 +79,7 @@ class GShapTrainer:
         optimizer = torch.optim.SGD(model.parameters(), lr=self.learning_rate, momentum=0.0, weight_decay=0.0)
         generator = torch.Generator(device="cpu").manual_seed(int(seed))
         permutation = torch.randperm(len(self.train_x), generator=generator)
-        permutation_hash = sha256_array(permutation.numpy())
+        permutation_hash = sha256_array(permutation.numpy()) if self.config.runtime.keep_permutations else ""
         marginal = np.zeros(len(permutation), dtype=np.float64)
         previous_auc = self.config.train.baseline_auc
         train_time = 0.0
@@ -99,7 +99,7 @@ class GShapTrainer:
                 train_events[0].record()
             optimizer.zero_grad(set_to_none=True)
             loss = self.loss_function(model(self.train_x[compact]), self.train_y[compact])
-            if not torch.isfinite(loss):
+            if (start // self.config.train.batch_size) % 100 == 0 and not torch.isfinite(loss):
                 raise FloatingPointError(f"Non-finite loss for seed {seed}, batch {start}")
             loss.backward()
             optimizer.step()
@@ -188,17 +188,20 @@ class GShapTrainer:
             if self.config.runtime.keep_permutations:
                 atomic_json(ensure_dir(output_dir / "permutations") / f"perm_{iteration:03d}.json",
                             {"seed": seed, "sha256": permutation_hash})
-            atomic_numpy(output_dir / "group_shap.npy", group_sum / iteration)
             write_csv(costs_path, [asdict(item) for item in rows], list(asdict(row)))
-            atomic_numpy(output_dir / "scores_iteration.npy", np.asarray(
-                [[item.initial_auc, item.final_auc] for item in rows], dtype=np.float64
-            ))
-            atomic_torch(checkpoint_path, {"completed_iterations": iteration, "group_sum": group_sum,
-                                           "cost_rows": [asdict(item) for item in rows]})
-            atomic_json(output_dir / "meta.json", {
-                "master_seed": master_seed, "learning_rate": self.learning_rate,
-                "completed_iterations": iteration, "target_iterations": self.config.train.iterations,
-                "status": "complete" if iteration == self.config.train.iterations else "running",
-                "config": self.config.to_dict(),
-            })
+            checkpoint_due = (iteration % self.config.runtime.checkpoint_every == 0
+                              or iteration == self.config.train.iterations)
+            if checkpoint_due:
+                atomic_numpy(output_dir / "group_shap.npy", group_sum / iteration)
+                atomic_numpy(output_dir / "scores_iteration.npy", np.asarray(
+                    [[item.initial_auc, item.final_auc] for item in rows], dtype=np.float64
+                ))
+                atomic_torch(checkpoint_path, {"completed_iterations": iteration, "group_sum": group_sum,
+                                               "cost_rows": [asdict(item) for item in rows]})
+                atomic_json(output_dir / "meta.json", {
+                    "master_seed": master_seed, "learning_rate": self.learning_rate,
+                    "completed_iterations": iteration, "target_iterations": self.config.train.iterations,
+                    "status": "complete" if iteration == self.config.train.iterations else "running",
+                    "config": self.config.to_dict(),
+                })
         return output_dir

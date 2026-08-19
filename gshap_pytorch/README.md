@@ -56,7 +56,7 @@ python scripts/run_all.py \
 python scripts/run_all.py \
   --data-dir ../packed_data \
   --results-dir results/ucf_crime \
-  --devices cuda:0 cuda:1 cuda:2 \
+  --devices cuda:0 cuda:1 cuda:3 \
   --parallel
 ```
 
