@@ -16,7 +16,7 @@ from .data import DatasetBundle
 from .device import resolve_device, synchronize
 from .flops import permutation_flops
 from .io_utils import atomic_json, atomic_numpy, atomic_torch, ensure_dir, sha256_array, write_csv
-from .metrics import binary_auc_batch, evaluate_auc
+from .metrics import binary_auc_batch
 from .model import PlovadDecoder
 from .seeds import derive_iteration_seeds, set_seed
 
@@ -62,6 +62,19 @@ def _load_cost_rows(path: Path) -> list[CostRow]:
     return rows
 
 
+def _decoder_logits(features: torch.Tensor, w1: torch.Tensor, b1: torch.Tensor,
+                    w2: torch.Tensor, b2: torch.Tensor) -> torch.Tensor:
+    """Manual PlovadDecoder forward, trailing unit dim removed.
+
+    Every permutation path (sequential S=1 and stacked S>1) runs this exact
+    bmm arithmetic, so all paths execute the same gemm kernels and agree to the
+    last bit; going through nn.Conv1d would dispatch to a different kernel and
+    drift at the ulp level.
+    """
+    hidden = F.gelu(torch.bmm(features, w1) + b1)
+    return (torch.bmm(hidden, w2) + b2).squeeze(-1)
+
+
 class GShapTrainer:
     def __init__(self, bundle: DatasetBundle, config: ExperimentConfig, learning_rate: float) -> None:
         self.bundle = bundle
@@ -75,62 +88,15 @@ class GShapTrainer:
         self.loss_function = nn.BCEWithLogitsLoss()
 
     def _run_permutation(self, seed: int) -> tuple[np.ndarray, float, float, float, float, float, str]:
-        set_seed(seed, self.config.runtime.deterministic)
-        model = PlovadDecoder(self.config.model.input_dim, self.config.model.hidden_dim).to(self.device)
-        optimizer = torch.optim.SGD(model.parameters(), lr=self.learning_rate, momentum=0.0, weight_decay=0.0)
-        generator = torch.Generator(device="cpu").manual_seed(int(seed))
-        permutation = torch.randperm(len(self.train_x), generator=generator)
-        permutation_hash = sha256_array(permutation.numpy()) if self.config.runtime.keep_permutations else ""
-        marginal = np.zeros(len(permutation), dtype=np.float64)
-        previous_auc = self.config.train.baseline_auc
-        train_time = 0.0
-        evaluation_time = 0.0
-        gpu_train_time = 0.0
-        gpu_evaluation_time = 0.0
-        train_events = (torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)) if self.device.type == "cuda" else None
-        eval_events = (torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)) if self.device.type == "cuda" else None
+        """Single-permutation run, delegated to the stacked core with one stream.
 
-        for start in range(0, len(permutation), self.config.train.batch_size):
-            compact_cpu = permutation[start : start + self.config.train.batch_size]
-            compact = compact_cpu.to(self.device)
-            model.train()
-            synchronize(self.device)
-            begin = time.perf_counter()
-            if train_events:
-                train_events[0].record()
-            optimizer.zero_grad(set_to_none=True)
-            loss = self.loss_function(model(self.train_x[compact]), self.train_y[compact])
-            if (start // self.config.train.batch_size) % 100 == 0 and not torch.isfinite(loss):
-                raise FloatingPointError(f"Non-finite loss for seed {seed}, batch {start}")
-            loss.backward()
-            optimizer.step()
-            if train_events:
-                train_events[1].record()
-            synchronize(self.device)
-            train_time += time.perf_counter() - begin
-            if train_events:
-                gpu_train_time += train_events[0].elapsed_time(train_events[1]) / 1_000.0
-
-            synchronize(self.device)
-            begin = time.perf_counter()
-            if eval_events:
-                eval_events[0].record()
-            current_auc = evaluate_auc(model, self.test_x, self.test_y)
-            if eval_events:
-                eval_events[1].record()
-            synchronize(self.device)
-            evaluation_time += time.perf_counter() - begin
-            if eval_events:
-                gpu_evaluation_time += eval_events[0].elapsed_time(eval_events[1]) / 1_000.0
-            positions = compact_cpu.numpy()
-            marginal[positions] = (current_auc - previous_auc) / len(positions)
-            previous_auc = current_auc
-
-        efficiency_error = abs(float(marginal.sum()) - (previous_auc - self.config.train.baseline_auc))
-        if efficiency_error > self.config.train.efficiency_tolerance:
-            raise AssertionError(f"Efficiency identity failed: {efficiency_error:.3e}")
-        return (marginal, previous_auc, train_time, evaluation_time,
-                gpu_train_time, gpu_evaluation_time, permutation_hash)
+        Both paths share `_decoder_logits` bmm arithmetic, so a permutation
+        yields the same marginals whether run alone or inside a stacked group
+        (`scripts/verify_stacked.py` checks this on GPU)."""
+        marginals, final_aucs, train_time, evaluation_time, gpu_train, gpu_eval, hashes = (
+            self._run_permutations_stacked([seed]))
+        return (marginals[0], float(final_aucs[0]), train_time, evaluation_time,
+                gpu_train, gpu_eval, hashes[0])
 
     def _run_permutations_stacked(self, seeds: list[int]) -> tuple[np.ndarray, np.ndarray, float, float, float, float, list[str]]:
         """Run several permutations simultaneously by stacking S decoder copies along
@@ -197,10 +163,7 @@ class GShapTrainer:
             begin = time.perf_counter()
             if train_events:
                 train_events[0].record()
-            hidden = F.gelu(torch.bmm(features, w1) + b1)
-            # squeeze to (S, b): BCEWithLogits requires equal input/target shapes,
-            # and the sequential model emits 1-D logits, so the per-element math is identical
-            logits = (torch.bmm(hidden, w2) + b2).squeeze(2)
+            logits = _decoder_logits(features, w1, b1, w2, b2)  # (S, b)
             loss_per_stream = F.binary_cross_entropy_with_logits(
                 logits, targets, reduction="none").mean(dim=1)
             if (start // batch_size) % 100 == 0 and not torch.isfinite(loss_per_stream).all():
@@ -227,9 +190,7 @@ class GShapTrainer:
             if eval_events:
                 eval_events[0].record()
             with torch.no_grad():
-                hidden = F.gelu(torch.bmm(test_x, w1) + b1)
-                scores = (torch.bmm(hidden, w2) + b2).squeeze(2)
-                current_auc = binary_auc_batch(scores, test_labels)
+                current_auc = binary_auc_batch(_decoder_logits(test_x, w1, b1, w2, b2), test_labels)
             if eval_events:
                 eval_events[1].record()
             synchronize(device)
