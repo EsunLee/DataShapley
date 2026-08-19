@@ -109,6 +109,7 @@ packed_data/
 packed_data.7z
 
 # 非必要文档（本地保留，不入 git；代码/种子/实施计划除外）
+CLAUDE.md
 1904.02868v2.pdf
 *.xlsx
 工作日志.md
