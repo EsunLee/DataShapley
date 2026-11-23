@@ -97,6 +97,15 @@ CUBLAS_WORKSPACE_CONFIG=:4096:8 python scripts/benchmark_split_group.py \
 
 两张GPU的子进程各只看到分配的物理卡，内部均使用`cuda:0`。这个实验只测同一组排列的两卡并行耗时；不会将拆分结果写入正式的`group_seed5922`目录。
 
+若要核对**原始逐次执行路径**的耗时（而非上述优化后的stacked路径），加`--mode sequential`。该模式直接调用与`run_group.py`不带`--parallel-perms`时相同的`_run_permutation`，单GPU逐次跑完全部排列，双GPU各逐次跑一半。先用`--iterations 100`核对原表的100次估算；预计明显慢于stacked测试，请预留足够运行时间。
+
+```bash
+CUBLAS_WORKSPACE_CONFIG=:4096:8 python scripts/benchmark_split_group.py \
+  --data-dir ../packed_data --split-dir ../results/split \
+  --output-dir ../results/sequential_split_benchmark \
+  --devices cuda:0 cuda:3 --iterations 100 --mode sequential
+```
+
 ## 合成冒烟示例
 
 ```bash

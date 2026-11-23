@@ -33,8 +33,19 @@ def worker(args: argparse.Namespace) -> None:
     trainer = GShapTrainer(bundle, config, args.learning_rate)
     seeds = derive_iteration_seeds(args.seed, args.iterations)
     selected = [int(value) for value in seeds[args.start:args.stop]]
-    marginals, aucs, *_ = trainer._run_permutations_stacked(selected)
-    np.savez(args.output_file, marginal_sum=marginals.sum(axis=0), final_aucs=aucs)
+    if args.mode == "stacked":
+        marginals, aucs, *_ = trainer._run_permutations_stacked(selected)
+        marginal_sum = marginals.sum(axis=0)
+    else:
+        marginal_sum = np.zeros(len(trainer.train_x), dtype=np.float64)
+        aucs = []
+        for index, seed in enumerate(selected, start=args.start + 1):
+            marginal, auc, *_ = trainer._run_permutation(seed)
+            marginal_sum += marginal
+            aucs.append(auc)
+            print(f"Finished permutation {index}/{args.iterations}", flush=True)
+        aucs = np.asarray(aucs, dtype=np.float64)
+    np.savez(args.output_file, marginal_sum=marginal_sum, final_aucs=aucs)
     print(f"Finished permutations {args.start + 1}-{args.stop} on visible GPU 0", flush=True)
 
 
@@ -43,7 +54,7 @@ def child_command(args: argparse.Namespace, output: Path, start: int, stop: int)
             "--worker", "--data-dir", str(args.data_dir),
             "--split-dir", str(args.split_dir), "--output-file", str(output),
             "--seed", str(args.seed), "--iterations", str(args.iterations),
-            "--learning-rate", str(args.learning_rate),
+            "--learning-rate", str(args.learning_rate), "--mode", args.mode,
             "--start", str(start), "--stop", str(stop)]
 
 
@@ -65,6 +76,8 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=5922)
     parser.add_argument("--iterations", type=int, default=50)
     parser.add_argument("--learning-rate", type=float, default=0.1)
+    parser.add_argument("--mode", choices=("stacked", "sequential"), default="stacked",
+                        help="Use the optimized stacked path or the original one-permutation path")
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--stop", type=int)
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
@@ -119,6 +132,7 @@ def main() -> None:
         max_auc_difference = float(np.max(np.abs(single["final_aucs"] - combined_aucs)))
     report = {
         "master_seed": args.seed, "iterations": args.iterations, "devices": args.devices,
+        "mode": args.mode,
         "single_gpu_seconds": round(single_seconds, 2),
         "two_gpu_seconds": round(dual_seconds, 2),
         "speedup": round(single_seconds / dual_seconds, 3),
