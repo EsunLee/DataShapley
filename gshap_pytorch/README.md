@@ -70,6 +70,20 @@ python scripts/aggregate_results.py --results-dir results/ucf_crime
 
 生成逐点mean/std、长度704,459的NaN对齐数组，以及训练/总FLOPs和wall-time的`3×50` CSV。
 
+## 双GPU耗时实测
+
+以下基准使用相同的两个独立组（默认seed 13764、14933），分别在一张GPU上串行、两张GPU上同时运行。两种模式都保留现有的`--parallel-perms`组内并行，且写入带时间戳的新目录，不覆盖正式结果。请在与已完成实验相同的Python环境中执行；避开故障GPU 2。
+
+```bash
+cd gshap_pytorch
+CUBLAS_WORKSPACE_CONFIG=:4096:8 python scripts/benchmark_two_gpus.py \
+  --data-dir ../packed_data --split-dir ../results/split \
+  --output-dir ../results/two_gpu_benchmark \
+  --devices cuda:0 cuda:1
+```
+
+每组默认50次排列，完整基准总共运行4组。`benchmark_summary.json`记录串行和双GPU的端到端墙钟时间、加速比、耗时降低百分比，以及同一seed在两种模式下估值的最大绝对差。首次仅检查命令能否工作时可加`--iterations 2`，但该短跑结果不能代表正式50次排列的加速比。该基准测试的是**两个独立组的总耗时**，并不测试“单组50次排列分布到两张GPU”。
+
 ## 合成冒烟示例
 
 ```bash
