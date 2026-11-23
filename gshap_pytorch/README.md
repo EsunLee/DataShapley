@@ -84,6 +84,19 @@ CUBLAS_WORKSPACE_CONFIG=:4096:8 python scripts/benchmark_two_gpus.py \
 
 每个子进程通过`CUDA_VISIBLE_DEVICES`只看到分配给它的物理GPU，进程内部使用`cuda:0`。每组默认50次排列，完整基准总共运行4组。`benchmark_summary.json`记录串行和双GPU的端到端墙钟时间、加速比、耗时降低百分比，以及同一seed在两种模式下估值的最大绝对差。首次仅检查命令能否工作时可加`--iterations 2`，但该短跑结果不能代表正式50次排列的加速比。该基准测试的是**两个独立组的总耗时**，并不测试“单组50次排列分布到两张GPU”。
 
+### 同一组拆到两张GPU
+
+下面的基准固定master seed 5922，先在GPU 0完成全部50次排列，再按原派生seed顺序将前25次交给GPU 0、后25次交给GPU 3并行运行。两种模式都使用现有stacked实现，比较端到端墙钟时间、逐排列最终AUC及合并后的边际贡献之和。结果写入独立时间戳目录，不会修改正式结果。
+
+```bash
+CUBLAS_WORKSPACE_CONFIG=:4096:8 python scripts/benchmark_split_group.py \
+  --data-dir ../packed_data --split-dir ../results/split \
+  --output-dir ../results/split_group_benchmark \
+  --devices cuda:0 cuda:3
+```
+
+两张GPU的子进程各只看到分配的物理卡，内部均使用`cuda:0`。这个实验只测同一组排列的两卡并行耗时；不会将拆分结果写入正式的`group_seed5922`目录。
+
 ## 合成冒烟示例
 
 ```bash
