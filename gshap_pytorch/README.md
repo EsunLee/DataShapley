@@ -82,7 +82,7 @@ CUBLAS_WORKSPACE_CONFIG=:4096:8 python scripts/benchmark_two_gpus.py \
   --devices cuda:0 cuda:1
 ```
 
-每组默认50次排列，完整基准总共运行4组。`benchmark_summary.json`记录串行和双GPU的端到端墙钟时间、加速比、耗时降低百分比，以及同一seed在两种模式下估值的最大绝对差。首次仅检查命令能否工作时可加`--iterations 2`，但该短跑结果不能代表正式50次排列的加速比。该基准测试的是**两个独立组的总耗时**，并不测试“单组50次排列分布到两张GPU”。
+每个子进程通过`CUDA_VISIBLE_DEVICES`只看到分配给它的物理GPU，进程内部使用`cuda:0`。每组默认50次排列，完整基准总共运行4组。`benchmark_summary.json`记录串行和双GPU的端到端墙钟时间、加速比、耗时降低百分比，以及同一seed在两种模式下估值的最大绝对差。首次仅检查命令能否工作时可加`--iterations 2`，但该短跑结果不能代表正式50次排列的加速比。该基准测试的是**两个独立组的总耗时**，并不测试“单组50次排列分布到两张GPU”。
 
 ## 合成冒烟示例
 

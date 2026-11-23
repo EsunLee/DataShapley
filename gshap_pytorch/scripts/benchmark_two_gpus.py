@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import shutil
 import subprocess
 import sys
@@ -23,29 +25,35 @@ def prepare_split(source: Path, destination: Path) -> None:
         shutil.copy2(source / name, destination / name)
 
 
-def command(args: argparse.Namespace, result_dir: Path, seed: int, device: str) -> list[str]:
+def command(args: argparse.Namespace, result_dir: Path, seed: int) -> list[str]:
     return [sys.executable, str(ROOT / "scripts" / "run_group.py"),
             "--data-dir", str(args.data_dir), "--results-dir", str(result_dir),
-            "--seed", str(seed), "--device", device,
+            "--seed", str(seed), "--device", "cuda:0",
             "--iterations", str(args.iterations), "--learning-rate", str(args.learning_rate),
             "--parallel-perms"]
+
+
+def gpu_environment(device: str) -> dict[str, str]:
+    env = os.environ.copy()
+    env["CUDA_VISIBLE_DEVICES"] = device.split(":", 1)[1]
+    return env
 
 
 def run_case(args: argparse.Namespace, name: str, devices: tuple[str, str],
              source_split: Path, output: Path, parallel: bool) -> float:
     result_dir = output / name
     prepare_split(source_split, result_dir / "split")
-    commands = [command(args, result_dir, seed, device)
-                for seed, device in zip(args.seeds, devices, strict=True)]
+    commands = [command(args, result_dir, seed) for seed in args.seeds]
     started = time.perf_counter()
     if parallel:
-        processes = [subprocess.Popen(item) for item in commands]
+        processes = [subprocess.Popen(item, env=gpu_environment(device))
+                     for item, device in zip(commands, devices, strict=True)]
         codes = [process.wait() for process in processes]
         if any(codes):
             raise RuntimeError(f"{name} failed with exit codes {codes}; outputs: {result_dir}")
     else:
-        for item in commands:
-            subprocess.run(item, check=True)
+        for item, device in zip(commands, devices, strict=True):
+            subprocess.run(item, env=gpu_environment(device), check=True)
     elapsed = time.perf_counter() - started
     print(f"{name}: {elapsed:.2f} s", flush=True)
     return elapsed
@@ -69,6 +77,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.devices[0] == args.devices[1]:
         parser.error("--devices must name two distinct GPUs")
+    if any(re.fullmatch(r"cuda:\d+", item) is None for item in args.devices):
+        parser.error("--devices must use physical GPU indices, e.g. cuda:0 cuda:3")
     if args.seeds[0] == args.seeds[1]:
         parser.error("--seeds must be distinct")
     if args.iterations < 1 or args.learning_rate <= 0:
