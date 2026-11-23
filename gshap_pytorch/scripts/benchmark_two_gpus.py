@@ -52,6 +52,11 @@ def run_case(args: argparse.Namespace, name: str, devices: tuple[str, str],
 
 
 def main() -> None:
+    if sys.version_info < (3, 10):
+        raise SystemExit(
+            f"Python 3.10+ is required by gshap_pytorch (current: {sys.version.split()[0]}). "
+            "Activate the same environment used for the completed seed 5922 run."
+        )
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--split-dir", type=Path, required=True,
